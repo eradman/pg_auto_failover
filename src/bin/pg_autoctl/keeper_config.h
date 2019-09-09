@@ -45,6 +45,9 @@ typedef struct KeeperConfig
 	int prepare_promotion_walreceiver;
 	int postgresql_restart_failure_timeout;
 	int postgresql_restart_failure_max_retries;
+
+	/* httpd defaults */
+	HttpdConfig httpd;
 } KeeperConfig;
 
 bool keeper_config_set_pathnames_from_pgdata(ConfigFilePaths *pathnames,

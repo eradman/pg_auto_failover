@@ -19,6 +19,7 @@
 #include "commandline.h"
 #include "defaults.h"
 #include "fsm.h"
+#include "httpd.h"
 #include "keeper_config.h"
 #include "keeper.h"
 #include "monitor.h"
@@ -130,6 +131,12 @@ cli_keeper_run(int argc, char **argv)
 		exit(EXIT_CODE_KEEPER);
 	}
 
+	/*
+	 * FIXME? We give the same PGDATA as given by the user. On some OS, the
+	 * actual path may be a different one that the path given as input, e.g.
+	 * rewriting /tmp to /private/tmp. When this happens, we can't find the
+	 * Keeper configuration file from the embedded HTTP server.
+	 */
 	keeper_config_read_file(&(keeper.config),
 							missing_pgdata_is_ok,
 							pg_is_not_running_is_ok);
@@ -145,6 +152,10 @@ cli_keeper_run(int argc, char **argv)
 		/* errors have already been logged */
 		exit(EXIT_CODE_MONITOR);
 	}
+
+	httpd_start_process(keeperOptions.pgSetup.pgdata,
+						keeper.config.httpd.listen_address,
+						keeper.config.httpd.port);
 
 	keeper_service_run(&keeper, &pid);
 }

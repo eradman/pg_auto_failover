@@ -22,6 +22,7 @@
 #include "defaults.h"
 #include "file_utils.h"
 #include "fsm.h"
+#include "httpd.h"
 #include "keeper_config.h"
 #include "keeper.h"
 #include "monitor.h"
@@ -524,4 +525,54 @@ keeper_cli_destroy_keeper_node(Keeper *keeper, KeeperConfig *config)
 
 	stop_postgres_and_remove_pgdata_and_config(&(config->pathnames),
 											   &(config->pgSetup));
+}
+
+
+/*
+ * keeper_cli_httpd_start starts our embedded HTTPd server.
+ *
+ */
+void
+keeper_cli_httpd_start(int argc, char **argv)
+{
+	Keeper keeper = { 0 };
+	KeeperConfig config = keeperOptions;
+
+	bool missing_pgdata_is_ok = true;
+	bool pg_is_not_running_is_ok = true;
+
+	if (!keeper_config_set_pathnames_from_pgdata(&config.pathnames,
+												 config.pgSetup.pgdata))
+	{
+		/* errors have already been logged */
+		exit(EXIT_CODE_BAD_ARGS);
+	}
+
+	switch (ProbeConfigurationFileRole(config.pathnames.config))
+	{
+		case PG_AUTOCTL_ROLE_MONITOR:
+		{
+			log_fatal("HTTPD is not support for the monitor yet");
+			exit(EXIT_CODE_MONITOR);
+		}
+
+		case PG_AUTOCTL_ROLE_KEEPER:
+		{
+			keeper_config_read_file(&config,
+									missing_pgdata_is_ok,
+									pg_is_not_running_is_ok);
+
+			httpd_start(config.pgSetup.pgdata,
+						config.httpd.listen_address,
+						config.httpd.port);
+			break;
+		}
+
+		default:
+		{
+			log_fatal("Unrecognized configuration file \"%s\"",
+					  config.pathnames.config);
+			exit(EXIT_CODE_BAD_CONFIG);
+		}
+	}
 }

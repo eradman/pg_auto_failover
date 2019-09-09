@@ -20,6 +20,7 @@ COMMANDLINE_SRC = $(wildcard ${SRC_DIR}../lib/subcommands.c/commandline.*)
 COMMON_LIBS  = -I${SRC_DIR}../lib/log/src/
 COMMON_LIBS += -I${SRC_DIR}../lib/subcommands.c/
 COMMON_LIBS += -I${SRC_DIR}../lib/libs/
+COMMON_LIBS += -I${SRC_DIR}../lib/mmx/
 
 CC = $(shell $(PG_CONFIG) --cc)
 

@@ -20,3 +20,15 @@ The single-header library is used to implement parsing "modern" command lines.
 ## Configuration file parsing
 
 We utilize the "ini.h" ini-file reader from https://github.com/mattiasgustavsson/libs
+
+## HTTP and JSON
+
+We use https://github.com/vurtun/mmx implementation of an HTTP server in C,
+with some extra facilities such as JSON parsing. The library is licenced
+separately for the different files:
+
+  - json.h is public domain
+  - lexer.h is zlib licence, required by json.h
+  - sched.h is zlib licence
+  - vec.h is zlib licence
+  - web.h is BSD licence

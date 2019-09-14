@@ -520,7 +520,7 @@ keeper_init_maybe_initdb(Keeper *keeper, bool *pgInstanceIsOurs)
 	 * invocation, so as to be able to init several times until everything is
 	 * fixed.
 	 */
-	if (initState.pgInitState == PRE_INIT_STATE_EMTPY)
+	if (initState.pgInitState == PRE_INIT_STATE_EMPTY)
 	{
 		*pgInstanceIsOurs = true;
 	}

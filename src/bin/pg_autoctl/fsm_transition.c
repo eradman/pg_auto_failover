@@ -34,6 +34,7 @@
 #include "keeper_pg_init.h"
 #include "log.h"
 #include "monitor.h"
+#include "pghba.h"
 #include "primary_standby.h"
 #include "state.h"
 
@@ -43,7 +44,11 @@ static bool prepare_replication(Keeper *keeper, bool other_node_missing_is_ok);
 /*
  * fsm_init_primary initialises the postgres server as primary.
  *
- *    start_postgres
+ * This function actually covers the transition from INIT to SINGLE.
+ *
+ *    pg_ctl initdb (if necessary)
+ * && create database + create extension (if necessary)
+ * && start_postgres
  * && promote_standby (if applicable)
  * && add_default_settings
  * && create_monitor_user
@@ -64,6 +69,7 @@ fsm_init_primary(Keeper *keeper)
 	KeeperStateInit initState = { 0 };
 	PostgresSetup pgSetup = keeper->config.pgSetup;
 	bool postgresInstanceExists = pg_setup_pgdata_exists(&pgSetup);
+	bool pgInstanceIsOurs = false;
 
 	log_info("Initialising postgres as a primary");
 
@@ -78,6 +84,10 @@ fsm_init_primary(Keeper *keeper)
 				  config->pathnames.init);
 		return false;
 	}
+
+	pgInstanceIsOurs =
+		   initState.pgInitState == PRE_INIT_STATE_EMPTY
+		|| initState.pgInitState == PRE_INIT_STATE_EXISTS;
 
 	if (initState.pgInitState == PRE_INIT_STATE_EMPTY
 		&& !postgresInstanceExists)
@@ -100,25 +110,6 @@ fsm_init_primary(Keeper *keeper)
 			/* errors have already been logged */
 			return false;
 		}
-
-		if (!create_database_and_extension(keeper))
-		{
-			/* errors have already been logged */
-			return false;
-		}
-	}
-	else if (initState.pgInitState == PRE_INIT_STATE_EXISTS)
-	{
-		/*
-		 * The PostgreSQL instance exists (there's a PGDATA) when creating the
-		 * pg_autoctl node the first time, but was not running. We can restart
-		 * the instance without fear of disturbing the service.
-		 */
-		if (!create_database_and_extension(keeper))
-		{
-			/* errors have already been logged */
-			return false;
-		}
 	}
 	else if (initState.pgInitState >= PRE_INIT_STATE_RUNNING)
 	{
@@ -127,6 +118,21 @@ fsm_init_primary(Keeper *keeper)
 				  pgSetup.pgdata);
 
 		return false;
+	}
+
+	/*
+	 * When the PostgreSQL instance either did not exist, or did exist but was
+	 * not running when creating the pg_autoctl node the first time, then we
+	 * can restart the instance without fear of disturbing the service.
+	 */
+	if (pgInstanceIsOurs)
+	{
+		/* creaste the target database and install our extension there */
+		if (!create_database_and_extension(keeper))
+		{
+			/* errors have already been logged */
+			return false;
+		}
 	}
 
 	/*
@@ -143,6 +149,11 @@ fsm_init_primary(Keeper *keeper)
 		return false;
 	}
 
+	/*
+	 * Now is the time to make sure Postgres is running, as our next steps to
+	 * prepare a SINGLE from INIT are depending on being able to connect to the
+	 * local Postgres service.
+	 */
 	if (!ensure_local_postgres_is_running(postgres))
 	{
 		log_error("Failed to initialise postgres as primary because "
@@ -150,6 +161,11 @@ fsm_init_primary(Keeper *keeper)
 		return false;
 	}
 
+	/*
+	 * FIXME: In the current FSM, I am not sure this can happen anymore. That
+	 * said we might want to remain compatible with initializing a SINGLE from
+	 * an pre-existing standby. I wonder why/how it would come to that though.
+	 */
 	if (pgsql_is_in_recovery(pgsql, &inRecovery) && inRecovery)
 	{
 		log_info("Initialising a postgres server in recovery mode "
@@ -163,6 +179,10 @@ fsm_init_primary(Keeper *keeper)
 		}
 	}
 
+	/*
+	 * We just created the local Postgres cluster, make sure it has our minimum
+	 * configuration deployed.
+	 */
 	if (!postgres_add_default_settings(postgres))
 	{
 		log_error("Failed to initialise postgres as primary because "
@@ -170,6 +190,10 @@ fsm_init_primary(Keeper *keeper)
 		return false;
 	}
 
+	/*
+	 * Now add the role and HBA entries necessary for the monitor to run health
+	 * checks on the local Postgres node.
+	 */
 	password = NULL;
 	authMethod = pg_setup_get_auth_method(&(config->pgSetup));
 
@@ -183,6 +207,10 @@ fsm_init_primary(Keeper *keeper)
 		return false;
 	}
 
+	/*
+	 * This node is intended to be used as a primary later in the setup, when
+	 * we have a standby node to register, so prepare the replication user now.
+	 */
 	if (!primary_create_replication_user(postgres, PG_AUTOCTL_REPLICA_USERNAME,
 										 config->replication_password))
 	{
@@ -190,6 +218,55 @@ fsm_init_primary(Keeper *keeper)
 				  "creating the replication user for the standby failed, "
 				  "see above for details");
 		return false;
+	}
+
+	/*
+	 * What remains to be done is either opening the HBA for a test setup, or
+	 * when we are initializing pg_auto_failover on an existing PostgreSQL
+	 * primary server instance, making sure that the parameters are all set.
+	 */
+	if (pgInstanceIsOurs)
+	{
+		if (getenv("PG_REGRESS_SOCK_DIR") != NULL)
+		{
+			/*
+			 * In test environements allow nodes from the same network to
+			 * connect. The network is discovered automatically.
+			 */
+			(void) pghba_enable_lan_cidr(&keeper->postgres.sqlClient,
+										 HBA_DATABASE_ALL, NULL,
+										 keeper->config.nodename,
+										 NULL, DEFAULT_AUTH_METHOD, NULL);
+		}
+	}
+	else
+	{
+		/*
+		 * As we are registering a previsouly existing PostgreSQL
+		 * instance, we now check that our mininum configuration
+		 * requirements for pg_auto_failover are in place. If not, tell
+		 * the user they must restart PostgreSQL at their next
+		 * maintenance window to fully enable pg_auto_failover.
+		 */
+		bool settings_are_ok = false;
+
+		if (!check_postgresql_settings(&(keeper->postgres),
+									   &settings_are_ok))
+		{
+			log_fatal("Failed to check local PostgreSQL settings "
+					  "compliance with pg_auto_failover, "
+					  "see above for details");
+			return false;
+		}
+		else if (!settings_are_ok)
+		{
+			log_fatal("Current PostgreSQL settings are not compliant "
+					  "with pg_auto_failover requirements, "
+					  "please restart PostgreSQL at the next "
+					  "opportunity to enable pg_auto_failover changes, "
+					  "and redo `pg_autoctl create`");
+			return false;
+		}
 	}
 
 	/* and we're done with this connection. */

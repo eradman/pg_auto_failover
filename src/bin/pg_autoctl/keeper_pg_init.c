@@ -46,8 +46,6 @@ static bool reach_initial_state(Keeper *keeper);
 static bool keeper_init_maybe_initdb(Keeper *keeper,
 									 bool *shouldCreateInstance);
 
-static bool create_database_and_extension(Keeper *keeper);
-
 static bool wait_until_primary_is_ready(Keeper *config,
 										MonitorAssignedState *assignedState);
 
@@ -299,16 +297,6 @@ reach_initial_state(Keeper *keeper)
 	log_trace("reach_initial_state: %s to %s",
 			  NodeStateToString(keeper->state.current_role),
 			  NodeStateToString(keeper->state.assigned_role));
-
-	/*
-	 * In somes cases we have some preparation steps to do: pg_ctl initdb. Now
-	 * is the right time to do them.
-	 */
-	if (!keeper_init_maybe_initdb(keeper, &pgInstanceIsOurs))
-	{
-		/* errors have already been logged */
-		return false;
-	}
 
 	/*
 	 * It might happen that PGDATA already exists at this point, but the
@@ -691,7 +679,7 @@ wait_until_primary_is_ready(Keeper *keeper,
  * shared_preload_libraries = 'citus' entry, so we can proceed with create
  * extension citus after the restart.
  */
-static bool
+bool
 create_database_and_extension(Keeper *keeper)
 {
 	KeeperConfig *config = &(keeper->config);

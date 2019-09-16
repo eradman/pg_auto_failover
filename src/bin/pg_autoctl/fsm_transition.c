@@ -31,6 +31,7 @@
 #include "pgctl.h"
 #include "fsm.h"
 #include "keeper.h"
+#include "keeper_pg_init.h"
 #include "log.h"
 #include "monitor.h"
 #include "primary_standby.h"
@@ -60,8 +61,78 @@ fsm_init_primary(Keeper *keeper)
 	int monitorPort = 0;
 	char *authMethod = NULL;
 
+	KeeperStateInit initState = { 0 };
+	PostgresSetup pgSetup = keeper->config.pgSetup;
+	bool postgresInstanceExists = pg_setup_pgdata_exists(&pgSetup);
+
 	log_info("Initialising postgres as a primary");
 
+	/*
+	 * When initialializing the local node on-top of an empty (or non-existing)
+	 * PGDATA directory, now is the time to `pg_ctl initdb`.
+	 */
+	if (!keeper_init_state_read(keeper, &initState))
+	{
+		log_error("Failed to read init state file \"%s\", which is required "
+				  "for the transition from INIT to SINGLE.",
+				  config->pathnames.init);
+		return false;
+	}
+
+	if (initState.pgInitState == PRE_INIT_STATE_EMPTY
+		&& !postgresInstanceExists)
+	{
+		if (!pg_ctl_initdb(pgSetup.pg_ctl, pgSetup.pgdata))
+		{
+			log_fatal("Failed to initialise a PostgreSQL instance at \"%s\""
+					  ", see above for details", pgSetup.pgdata);
+
+			return false;
+		}
+
+		/*
+		 * We managed to initdb, refresh our configuration file location with
+		 * the realpath(3) from pg_setup_update_config_with_absolute_pgdata:
+		 *  we might have been given a relative pathname.
+		 */
+		if (!keeper_config_update_with_absolute_pgdata(&(keeper->config)))
+		{
+			/* errors have already been logged */
+			return false;
+		}
+
+		if (!create_database_and_extension(keeper))
+		{
+			/* errors have already been logged */
+			return false;
+		}
+	}
+	else if (initState.pgInitState == PRE_INIT_STATE_EXISTS)
+	{
+		/*
+		 * The PostgreSQL instance exists (there's a PGDATA) when creating the
+		 * pg_autoctl node the first time, but was not running. We can restart
+		 * the instance without fear of disturbing the service.
+		 */
+		if (!create_database_and_extension(keeper))
+		{
+			/* errors have already been logged */
+			return false;
+		}
+	}
+	else if (initState.pgInitState >= PRE_INIT_STATE_RUNNING)
+	{
+		log_error("PostgreSQL is already running at \"%s\", refusing to "
+				  "initialize a new cluster on-top of the current one.",
+				  pgSetup.pgdata);
+
+		return false;
+	}
+
+	/*
+	 * We need to add the monitor host:port in the HBA settings for the node to
+	 * enable the health checks.
+	 */
 	if (!hostname_from_uri(config->monitor_pguri,
 						   monitorHostname, _POSIX_HOST_NAME_MAX,
 						   &monitorPort))
@@ -74,28 +145,28 @@ fsm_init_primary(Keeper *keeper)
 
 	if (!ensure_local_postgres_is_running(postgres))
 	{
-		log_error("Failed to initialise postgres as primary because starting postgres "
-				  "failed, see above for details");
+		log_error("Failed to initialise postgres as primary because "
+				  "starting postgres failed, see above for details");
 		return false;
 	}
 
 	if (pgsql_is_in_recovery(pgsql, &inRecovery) && inRecovery)
 	{
-		log_info("Initialising a postgres server in recovery mode as the primary, "
-				 "promoting");
+		log_info("Initialising a postgres server in recovery mode "
+				 "as the primary, promoting");
 
 		if (!standby_promote(postgres))
 		{
-			log_error("Failed to initialise postgres as primary because promoting "
-					  "postgres failed, see above for details");
+			log_error("Failed to initialise postgres as primary because "
+					  "promoting postgres failed, see above for details");
 			return false;
 		}
 	}
 
 	if (!postgres_add_default_settings(postgres))
 	{
-		log_error("Failed to initialise postgres as primary because adding default "
-				  "settings failed, see above for details");
+		log_error("Failed to initialise postgres as primary because "
+				  "adding default settings failed, see above for details");
 		return false;
 	}
 
@@ -106,8 +177,8 @@ fsm_init_primary(Keeper *keeper)
 									  PG_AUTOCTL_HEALTH_USERNAME, password,
 									  monitorHostname, authMethod))
 	{
-		log_error("Failed to initialise postgres as primary because creating the "
-				  "database user that the pg_auto_failover monitor "
+		log_error("Failed to initialise postgres as primary because "
+				  "creating the database user that the pg_auto_failover monitor "
 				  "uses for health checks failed, see above for details");
 		return false;
 	}
@@ -115,8 +186,9 @@ fsm_init_primary(Keeper *keeper)
 	if (!primary_create_replication_user(postgres, PG_AUTOCTL_REPLICA_USERNAME,
 										 config->replication_password))
 	{
-		log_error("Failed to initialise postgres as primary because creating the "
-				  "replication user for the standby failed, see above for details");
+		log_error("Failed to initialise postgres as primary because "
+				  "creating the replication user for the standby failed, "
+				  "see above for details");
 		return false;
 	}
 

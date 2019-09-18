@@ -124,6 +124,12 @@ cli_keeper_run(int argc, char **argv)
 	 * that loop, we need to install our signal handlers and pidfile prior to
 	 * getting there.
 	 */
+	if (!keeper_config_read_file_skip_pgsetup(&(keeper.config)))
+	{
+		/* errors have already been logged. */
+		exit(EXIT_CODE_BAD_CONFIG);
+	}
+
 	if (!keeper_service_init(&keeper, &pid))
 	{
 		log_fatal("Failed to initialize pg_auto_failover service, "
@@ -137,9 +143,13 @@ cli_keeper_run(int argc, char **argv)
 	 * rewriting /tmp to /private/tmp. When this happens, we can't find the
 	 * Keeper configuration file from the embedded HTTP server.
 	 */
-	keeper_config_read_file(&(keeper.config),
-							missing_pgdata_is_ok,
-							pg_is_not_running_is_ok);
+	if (!keeper_config_pgsetup_init(&(keeper.config),
+									missing_pgdata_is_ok,
+									pg_is_not_running_is_ok))
+	{
+		/* errors have already been logged */
+		exit(EXIT_CODE_BAD_CONFIG);
+	}
 
 	if (!keeper_init(&keeper, &keeper.config))
 	{
@@ -147,17 +157,34 @@ cli_keeper_run(int argc, char **argv)
 		exit(EXIT_CODE_PGCTL);
 	}
 
-	if (!keeper_check_monitor_extension_version(&keeper))
+	if (keeper.config.monitorDisabled)
 	{
-		/* errors have already been logged */
-		exit(EXIT_CODE_MONITOR);
+		/* TODO: start the HTTPd process under a supervisor */
+		httpd_start(keeperOptions.pgSetup.pgdata,
+					keeper.config.httpd.listen_address,
+					keeper.config.httpd.port);
+
+		(void) keeper_service_stop(&keeper);
 	}
+	else
+	{
+		/*
+		 * Start with a monitor, so check everything is in order, then start
+		 * the HTTPd service, and finally the main monitor node_active protocol
+		 * loop.
+		 */
+		if (!keeper_check_monitor_extension_version(&keeper))
+		{
+			/* errors have already been logged */
+			exit(EXIT_CODE_MONITOR);
+		}
 
-	httpd_start_process(keeperOptions.pgSetup.pgdata,
-						keeper.config.httpd.listen_address,
-						keeper.config.httpd.port);
+		httpd_start_process(keeperOptions.pgSetup.pgdata,
+							keeper.config.httpd.listen_address,
+							keeper.config.httpd.port);
 
-	keeper_service_run(&keeper, &pid);
+		keeper_service_run(&keeper, &pid);
+	}
 }
 
 

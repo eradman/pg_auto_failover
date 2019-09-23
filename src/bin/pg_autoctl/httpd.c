@@ -473,6 +473,8 @@ http_fsm_assign(struct wby_con *connection, void *userdata)
 						   "Failed to reach assign state \"%s\"\n",
 						   NodeStateToString(goalState));
 
+		log_error("%s", buffer);
+
 		wby_response_begin(connection, 501, strlen(buffer), NULL, 0);
 		wby_write(connection, buffer, len);
 		wby_response_end(connection);

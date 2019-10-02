@@ -141,14 +141,17 @@ fsm_init_primary(Keeper *keeper)
 	 * We need to add the monitor host:port in the HBA settings for the node to
 	 * enable the health checks.
 	 */
-	if (!hostname_from_uri(config->monitor_pguri,
-						   monitorHostname, _POSIX_HOST_NAME_MAX,
-						   &monitorPort))
+	if (!config->monitorDisabled)
 	{
-		/* developer error, this should never happen */
-		log_fatal("BUG: monitor_pguri should be validated before calling "
-				  "fsm_init_primary");
-		return false;
+		if (!hostname_from_uri(config->monitor_pguri,
+							   monitorHostname, _POSIX_HOST_NAME_MAX,
+							   &monitorPort))
+		{
+			/* developer error, this should never happen */
+			log_fatal("BUG: monitor_pguri should be validated before calling "
+					  "fsm_init_primary");
+			return false;
+		}
 	}
 
 	/*

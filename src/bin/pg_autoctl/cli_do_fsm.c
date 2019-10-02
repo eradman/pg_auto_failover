@@ -267,6 +267,13 @@ keeper_cli_fsm_assign(int argc, char **argv)
 		/* errors have already been logged */
 		exit(EXIT_CODE_BAD_STATE);
 	}
+
+	/* print our current PostgreSQL setup and Keeper's state */
+	fprintf(stdout, "\nCurrent PostgreSQL state:\n");
+	fprintf_pg_setup(stdout, &(keeper.postgres.postgresSetup));
+	fprintf(stdout, "\nCurrent Keeper's state:\n");
+	print_keeper_state(&keeper.state, stdout);
+	fprintf(stdout, "\n");
 }
 
 

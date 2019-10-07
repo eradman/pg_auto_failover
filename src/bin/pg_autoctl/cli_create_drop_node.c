@@ -31,6 +31,7 @@
 #include "monitor_pg_init.h"
 #include "pgctl.h"
 #include "primary_standby.h"
+#include "service.h"
 
 MonitorConfig monitorOptions;
 

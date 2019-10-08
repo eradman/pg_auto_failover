@@ -56,7 +56,8 @@ CommandLine create_monitor_command =
 				 "  --pgdata      path to data directory\n" \
 				 "  --pgport      PostgreSQL's port number\n" \
 				 "  --nodename    hostname by which postgres is reachable\n" \
-				 "  --auth        authentication method for connections from data nodes\n",
+				 "  --auth        authentication method for connections from data nodes\n"
+				 "  --run         create node then run pg_autoctl service\n",
 				 cli_create_monitor_getopts,
 				 cli_create_monitor);
 
@@ -107,13 +108,6 @@ cli_create_config(Keeper *keeper, KeeperConfig *config)
 	 *   - configuration exists already, we need PGDATA
 	 *   - configuration doesn't exist already, we need PGDATA, and more
 	 */
-	if (!keeper_config_set_pathnames_from_pgdata(&config->pathnames,
-												 config->pgSetup.pgdata))
-	{
-		/* errors have already been logged */
-		exit(EXIT_CODE_BAD_ARGS);
-	}
-
 	if (file_exists(config->pathnames.config))
 	{
 		KeeperConfig options = *config;
@@ -178,6 +172,24 @@ cli_create_pg(Keeper *keeper, KeeperConfig *config)
 	else
 	{
 		log_info("Keeper has been succesfully initialized.");
+
+		if (createAndRun)
+		{
+			pid_t pid = 0;
+
+			if (!service_init(keeper, &pid))
+			{
+				log_fatal("Failed to initialize pg_auto_failover service, "
+						  "see above for details");
+				exit(EXIT_CODE_KEEPER);
+			}
+
+			if (!service_start(keeper))
+			{
+				/* errors have already been logged */
+				exit(EXIT_CODE_INTERNAL_ERROR);
+			}
+		}
 	}
 
 	keeper_config_destroy(config);
@@ -213,12 +225,14 @@ cli_create_postgres_getopts(int argc, char **argv)
  		{ "help", no_argument, NULL, 'h' },
 		{ "candidate-priority", required_argument, NULL, 'P'},
 		{ "replication-quorum", required_argument, NULL, 'r'},
+		{ "run", no_argument, NULL, 'x' },
+		{ "help", no_argument, NULL, 0 },
 		{ NULL, 0, NULL, 0 }
 	};
 
 	int optind =
 		cli_create_node_getopts(argc, argv,
-								long_options, "C:D:H:p:l:U:A:d:n:f:m:MRVvqhP:r:",
+								long_options, "C:D:H:p:l:U:A:d:n:f:m:MRVvqhP:r:x",
 								&options);
 
 	/* publish our option parsing in the global variable */
@@ -238,14 +252,17 @@ cli_create_postgres(int argc, char **argv)
 	Keeper keeper = { 0 };
 	KeeperConfig config = keeperOptions;
 
-	/* pg_autoctl create postgres: mark ourselves as a standalone node */
-	config.pgSetup.pgKind = NODE_KIND_STANDALONE;
-	strlcpy(config.nodeKind, "standalone", NAMEDATALEN);
-
-	if (!check_or_discover_nodename(&config))
+	if (!file_exists(config.pathnames.config))
 	{
-		/* errors have already been logged */
-		exit(EXIT_CODE_BAD_ARGS);
+		/* pg_autoctl create postgres: mark ourselves as a standalone node */
+		config.pgSetup.pgKind = NODE_KIND_STANDALONE;
+		strlcpy(config.nodeKind, "standalone", NAMEDATALEN);
+
+		if (!check_or_discover_nodename(&config))
+		{
+			/* errors have already been logged */
+			exit(EXIT_CODE_BAD_ARGS);
+		}
 	}
 
 	if (!cli_create_config(&keeper, &config))
@@ -280,6 +297,8 @@ cli_create_monitor_getopts(int argc, char **argv)
 		{ "verbose", no_argument, NULL, 'v' },
 		{ "quiet", no_argument, NULL, 'q' },
  		{ "help", no_argument, NULL, 'h' },
+		{ "run", no_argument, NULL, 'x' },
+		{ "help", no_argument, NULL, 0 },
 		{ NULL, 0, NULL, 0 }
 	};
 
@@ -288,7 +307,7 @@ cli_create_monitor_getopts(int argc, char **argv)
 
 	optind = 0;
 
-	while ((c = getopt_long(argc, argv, "C:D:p:A:Vvqh",
+	while ((c = getopt_long(argc, argv, "C:D:p:n:l:A:Vvqhx",
 							long_options, &option_index)) != -1)
 	{
 		switch (c)
@@ -381,10 +400,18 @@ cli_create_monitor_getopts(int argc, char **argv)
 				break;
 			}
 
+			case 'x':
+			{
+				/* { "run", no_argument, NULL, 'r' }, */
+				createAndRun = true;
+				log_trace("--run");
+			}
+
 			default:
 			{
 				/* getopt_long already wrote an error message */
-				errors++;
+				commandline_help(stderr);
+				exit(EXIT_CODE_BAD_ARGS);
 				break;
 			}
 		}
@@ -551,6 +578,35 @@ cli_create_monitor(int argc, char **argv)
 	}
 
 	log_info("Monitor has been succesfully initialized.");
+
+	if (createAndRun)
+	{
+		char *channels[] = { "log", "state", NULL };
+
+		log_info("Contacting the monitor to LISTEN to its events.");
+		pgsql_listen(&(monitor.pgsql), channels);
+
+		/*
+		 * Main loop for notifications.
+		 */
+		for (;;)
+		{
+			if (!monitor_get_notifications(&monitor))
+			{
+				log_warn("Re-establishing connection. "
+						 "We might miss notifications.");
+				pgsql_finish(&(monitor.pgsql));
+
+				pgsql_listen(&(monitor.pgsql), channels);
+
+				/* skip sleeping */
+				continue;
+			}
+
+			sleep(PG_AUTOCTL_MONITOR_SLEEP_TIME);
+		}
+		pgsql_finish(&(monitor.pgsql));
+	}
 }
 
 

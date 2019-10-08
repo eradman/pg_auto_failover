@@ -131,8 +131,6 @@ fsm_init_primary(Keeper *keeper)
 		}
 	}
 
-	log_warn("FSM transition still running");
-
 	/*
 	 * Now is the time to make sure Postgres is running, as our next steps to
 	 * prepare a SINGLE from INIT are depending on being able to connect to the
@@ -278,7 +276,8 @@ fsm_init_primary(Keeper *keeper)
 	/* and we're done with this connection. */
 	pgsql_finish(pgsql);
 
-	return true;
+	/* now, in case we have an init state file around, remove it */
+	return unlink_file(config->pathnames.init);
 }
 
 

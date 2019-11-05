@@ -14,6 +14,7 @@
 #include "commandline.h"
 
 extern char pg_autoctl_argv0[];
+extern char pg_autoctl_program[];
 extern int logLevel;
 
 extern CommandLine help;

@@ -17,6 +17,7 @@
 #include "keeper_config.h"
 
 char pg_autoctl_argv0[MAXPGPATH];
+char pg_autoctl_program[MAXPGPATH];
 
 /*
  * Main entry point for the binary.
@@ -28,9 +29,16 @@ main(int argc, char **argv)
 
 	/*
 	 * Stash away the ARGV[0] used to run this program, we might need it to
-	 * fill in our systemd service unit configuration file later.
+	 * fill in our systemd service unit configuration file later. Also compute
+	 * the realpath of the program invoked, which we need at several places.
 	 */
 	strlcpy(pg_autoctl_argv0, argv[0], MAXPGPATH);
+
+	if (!get_program_absolute_path(pg_autoctl_program, MAXPGPATH))
+	{
+		/* errors have already been logged */
+		exit(EXIT_CODE_INTERNAL_ERROR);
+	}
 
 	/*
 	 * When PG_AUTOCTL_DEBUG is set in the environement, provide the user

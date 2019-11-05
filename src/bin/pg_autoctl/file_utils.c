@@ -438,6 +438,10 @@ get_program_absolute_path(char *program, int size)
 				  "to %d bytes only", actualSize, size);
 		return false;
 	}
+
+	log_debug("Found absolute program \"%s\" in \"%s\"",
+			  pg_autoctl_argv0, program);
+
 #else
 	/*
 	 * On Linux and FreeBSD and Solaris, we can find a symbolic link to our

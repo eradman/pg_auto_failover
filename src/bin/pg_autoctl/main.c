@@ -28,19 +28,6 @@ main(int argc, char **argv)
 	CommandLine command = root;
 
 	/*
-	 * Stash away the ARGV[0] used to run this program, we might need it to
-	 * fill in our systemd service unit configuration file later. Also compute
-	 * the realpath of the program invoked, which we need at several places.
-	 */
-	strlcpy(pg_autoctl_argv0, argv[0], MAXPGPATH);
-
-	if (!get_program_absolute_path(pg_autoctl_program, MAXPGPATH))
-	{
-		/* errors have already been logged */
-		exit(EXIT_CODE_INTERNAL_ERROR);
-	}
-
-	/*
 	 * When PG_AUTOCTL_DEBUG is set in the environement, provide the user
 	 * commands available to debug a pg_autoctl instance.
 	 */
@@ -71,6 +58,25 @@ main(int argc, char **argv)
 	 * directly to the user to make it easier to spot warnings and errors.
 	 */
 	log_use_colors(isatty(fileno(stderr)));
+
+	/*
+	 * Stash away the argv[0] used to run this program and compute the realpath
+	 * of the program invoked, which we need for running subcommands from the
+	 * HTTPd module, and when cooking the systemd unit file.
+	 *
+	 * Note that we're using log_debug() in get_program_absolute_path and we
+	 * have not set the log level from the command line option parsing yet. We
+	 * hard-coded LOG_INFO as our log level. For now we won't see the log_debug
+	 * output, but as a developer you could always change the LOG_INFO to
+	 * LOG_DEBUG above and then see the message.
+	 */
+	strlcpy(pg_autoctl_argv0, argv[0], MAXPGPATH);
+
+	if (!set_program_absolute_path(pg_autoctl_program, MAXPGPATH))
+	{
+		/* errors have already been logged */
+		exit(EXIT_CODE_INTERNAL_ERROR);
+	}
 
 	(void) commandline_run(&command, argc, argv);
 

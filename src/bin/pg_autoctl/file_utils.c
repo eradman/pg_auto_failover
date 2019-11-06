@@ -426,7 +426,7 @@ unlink_file(const char *filename)
  * then argv[0] (here pg_autoctl_argv0) is just "pg_autoctl".
  */
 bool
-get_program_absolute_path(char *program, int size)
+set_program_absolute_path(char *program, int size)
 {
 #if defined(__APPLE__)
 	int actualSize = _NSGetExecutablePath(program, (uint32_t *) &size);
@@ -439,8 +439,7 @@ get_program_absolute_path(char *program, int size)
 		return false;
 	}
 
-	log_debug("Found absolute program \"%s\" in \"%s\"",
-			  pg_autoctl_argv0, program);
+	log_debug("Found absolute program: \"%s\"", program);
 
 #else
 	/*

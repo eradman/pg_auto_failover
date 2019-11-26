@@ -118,7 +118,8 @@ class PGNode:
         run_command = [shutil.which('pg_autoctl'), 'run',
                        '--pgdata', self.datadir]
         self.pg_autoctl_run_proc = self.vnode.run(run_command)
-        print("pg_autoctl running in PID %d" % self.pg_autoctl_run_proc.pid)
+        print("pg_autoctl run --pgdata %s [%d]" \
+              % (self.datadir, self.pg_autoctl_run_proc.pid))
 
         # check that the process is still running after 1s
         time.sleep(1)
@@ -347,6 +348,11 @@ class DataNode(PGNode):
         else:
             print("%s didn't reach %s after %d attempts" %
                 (self.datadir, target_state, timeout))
+
+            self.pg_autoctl_run_proc.terminate()
+            print("pg_autoctl out: %s\n err: %s\n" %
+                  (self.pg_autoctl_run_proc.stdout.read(),
+                   self.pg_autoctl_run_proc.stderr.read()))
             return False
 
     def get_state(self):

@@ -115,7 +115,7 @@ class PGNode:
         """
         Runs "pg_autoctl run"
         """
-        run_command = [shutil.which('pg_autoctl'), 'run',
+        run_command = [shutil.which('pg_autoctl'), 'run', '-vvv',
                        '--pgdata', self.datadir]
         self.pg_autoctl_run_proc = self.vnode.run(run_command)
         print("pg_autoctl run --pgdata %s [%d]" \

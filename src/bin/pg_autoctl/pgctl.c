@@ -1073,8 +1073,9 @@ prepare_primary_conninfo(char *primaryConnInfo, int primaryConnInfoSize,
 		destroyPQExpBuffer(buffer);
 		return false;
 	}
-	appendPQExpBuffer(buffer, "host = %s", escaped);
-	appendPQExpBuffer(buffer, "port = %d", primaryPort);
+
+	appendPQExpBuffer(buffer, "host=%s", escaped);
+	appendPQExpBuffer(buffer, " port=%d ", primaryPort);
 
 	if (!escape_recovery_conf_string(escaped, BUFSIZE, replicationUsername))
 	{
@@ -1082,7 +1083,7 @@ prepare_primary_conninfo(char *primaryConnInfo, int primaryConnInfoSize,
 		destroyPQExpBuffer(buffer);
 		return false;
 	}
-	appendPQExpBuffer(buffer, "user = %s", escaped);
+	appendPQExpBuffer(buffer, " user=%s", escaped);
 
 	if (replicationPassword != NULL)
 	{
@@ -1092,7 +1093,7 @@ prepare_primary_conninfo(char *primaryConnInfo, int primaryConnInfoSize,
 			destroyPQExpBuffer(buffer);
 			return false;
 		}
-		appendPQExpBuffer(buffer, "password = %s", escaped);
+		appendPQExpBuffer(buffer, " password=%s", escaped);
 	}
 
 	/* memory allocation could have failed while building string */

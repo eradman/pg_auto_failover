@@ -116,8 +116,18 @@ class PGNode:
         Runs "pg_autoctl run"
         """
         run_command = [shutil.which('pg_autoctl'), 'run',
-                          '--pgdata', self.datadir]
+                       '--pgdata', self.datadir]
         self.pg_autoctl_run_proc = self.vnode.run(run_command)
+        print("pg_autoctl running in PID %d" % self.pg_autoctl_run_proc.pid)
+
+        # check that the process is still running after 1s
+        time.sleep(1)
+        if self.pg_autoctl_run_proc.returncode is not None:
+            if self.pg_autoctl_run_proc.returncode > 0:
+                raise Exception("%s failed, out: %s\n, err: %s" \
+                                % (run_command,
+                                   self.pg_autoctl_run_proc.stdout,
+                                   self.pg_autoctl_run_proc.stderr))
 
     def run_sql_query(self, query, *args):
         """

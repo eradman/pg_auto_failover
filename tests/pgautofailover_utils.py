@@ -9,7 +9,7 @@ import subprocess
 from enum import Enum
 
 COMMAND_TIMEOUT = 60
-STATE_CHANGE_TIMEOUT = 120
+STATE_CHANGE_TIMEOUT = 45
 
 class Role(Enum):
     Monitor = 1
@@ -425,7 +425,7 @@ SELECT reportedstate
         return "\n".join(
             ["%s:%-14s %17s/%-17s %7s %10s %s" % ("id", "nodename",
                                                   "state", "goal state",
-                                                  "repl state", "lsn", "event")]
+                                                  "repl st", "lsn", "event")]
             +
             ["%2d:%-14s %17s/%-17s %7s %10s %s" % (id, n, rs, gs, reps, lsn, desc)
              for id, n, rs, gs, reps, lsn, desc in self.get_events()])

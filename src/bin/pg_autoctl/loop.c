@@ -196,6 +196,14 @@ keeper_service_run(Keeper *keeper, pid_t *start_pid)
 		{
 			keeperState->last_monitor_contact = now;
 			keeperState->assigned_role = assignedState.state;
+
+			if (keeperState->assigned_role != keeperState->current_role)
+			{
+				needStateChange = true;
+
+				log_info("Monitor assigned new state \"%s\"",
+						 NodeStateToString(keeperState->assigned_role));
+			}
 		}
 		else
 		{
@@ -233,14 +241,18 @@ keeper_service_run(Keeper *keeper, pid_t *start_pid)
 		 * because the other node has been promoted, which could happen if this
 		 * node was rebooting for a long enough time.
 		 */
-		if (couldContactMonitor)
+		if (needStateChange)
 		{
-			if (keeperState->assigned_role != keeperState->current_role)
+			if (!keeper_fsm_reach_assigned_state(keeper))
 			{
-				log_info("Monitor assigned the new state \"%s\"",
-						 NodeStateToString(keeperState->assigned_role));
-			}
+				log_error("Failed to transition to state \"%s\", retrying... ",
+						  NodeStateToString(keeperState->assigned_role));
 
+				transitionFailed = true;
+			}
+		}
+		else if (couldContactMonitor)
+		{
 			if (!keeper_ensure_current_state(keeper))
 			{
 				log_warn("pg_autoctl failed to ensure current state \"%s\": "
@@ -251,19 +263,6 @@ keeper_service_run(Keeper *keeper, pid_t *start_pid)
 		}
 
 		CHECK_FOR_FAST_SHUTDOWN;
-
-		if (keeperState->assigned_role != keeperState->current_role)
-		{
-			needStateChange = true;
-
-			if (!keeper_fsm_reach_assigned_state(keeper))
-			{
-				log_error("Failed to transition to state \"%s\", retrying... ",
-						  NodeStateToString(keeperState->assigned_role));
-
-				transitionFailed = true;
-			}
-		}
 
 		/*
 		 * Even if a transition failed, we still write the state file to update

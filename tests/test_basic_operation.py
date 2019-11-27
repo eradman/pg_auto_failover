@@ -52,8 +52,10 @@ def test_005_writes_to_node2_fail():
 def test_006_maintenance():
     node2.enable_maintenance()
     assert node2.wait_until_state(target_state="maintenance")
+    print("stopping Postgres on node2 and inserting values on node1")
     node2.stop_postgres()
     node1.run_sql_query("INSERT INTO t1 VALUES (3)")
+    print("disabling maintenance")
     node2.disable_maintenance()
     assert node2.wait_until_pg_is_running()
     assert node2.wait_until_state(target_state="secondary")

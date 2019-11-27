@@ -368,21 +368,14 @@ class DataNode(PGNode):
             print("%s didn't reach %s after %d attempts; current state is '%s'" %
                   (self.datadir, target_state, timeout, current_state))
 
-            print("stopping pg_autoctl process %d" % self.pg_autoctl_run_proc.pid)
+            # grab pg_autoctl logs
             self.stop_pg_autoctl()
-
-            if self.pg_autoctl_run_proc is not None \
-               and self.pg_autoctl_run_proc.returncode is not None \
-               and self.pg_autoctl_run_proc.returncode > 0:
-                raise Exception("%s failed, out: %s\n, err: %s" \
-                                % (run_command,
-                                   self.pg_autoctl_run_proc.stdout,
-                                   self.pg_autoctl_run_proc.stderr))
-            else:
-                raise Exception("%s didn't reach %s after %d attempts; "
-                                "current state is '%s'" %
-                                (self.datadir, target_state,
-                                 timeout, current_state))
+            out, err = self.pg_autoctl_run_proc.communicate()
+            raise Exception("%s didn't reach %s after %d attempts; "
+                            "current state is '%s',\n"
+                            "pg_autoctl out: %s\n err: %s" \
+                            % (self.datadir, target_state, timeout,
+                               current_state, out, err))
 
     def get_state(self):
         """

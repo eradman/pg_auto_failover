@@ -9,7 +9,7 @@ import subprocess
 from enum import Enum
 
 COMMAND_TIMEOUT = 60
-STATE_CHANGE_TIMEOUT = 90
+STATE_CHANGE_TIMEOUT = 120
 
 class Role(Enum):
     Monitor = 1
@@ -131,10 +131,13 @@ class PGNode:
                         continue
                     print("Postgres log file %s:" % entry)
                     print("%s\n" % open(entry).read())
+                else:
+                    print("No Postgres log file found in %s" %
+                          os.path.join(self.datadir, "log"))
+
+                out, err = self.pg_autoctl_run_proc.communicate()
                 raise Exception("%s failed, out: %s\n, err: %s" \
-                                % (run_command,
-                                   self.pg_autoctl_run_proc.stdout,
-                                   self.pg_autoctl_run_proc.stderr))
+                                % (run_command, out, err))
 
     def run_sql_query(self, query, *args):
         """
@@ -171,8 +174,12 @@ class PGNode:
         """
         Kills the keeper by sending a SIGTERM to keeper's process group.
         """
-        if self.pg_autoctl_run_proc:
-            os.killpg(os.getpgid(self.pg_autoctl_run_proc.pid), signal.SIGQUIT)
+        if self.pg_autoctl_run_proc and self.pg_autoctl_run_proc.pid:
+            print("kill -QUIT %d" % self.pg_autoctl_run_proc.pid)
+            try:
+                os.killpg(os.getpgid(self.pg_autoctl_run_proc.pid), signal.SIGQUIT)
+            except ProcessLookupError as e:
+                print("no such process")
 
     def stop_postgres(self):
         """

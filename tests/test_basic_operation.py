@@ -72,8 +72,8 @@ def test_008_writes_to_node2_succeed():
 
 def test_009_start_node1_again():
     node1.run()
-    assert node1.wait_until_state(target_state="secondary")
     assert node2.wait_until_state(target_state="primary")
+    assert node1.wait_until_state(target_state="secondary")
 
 def test_010_read_from_new_secondary():
     results = node1.run_sql_query("SELECT * FROM t1 ORDER BY a")

@@ -235,6 +235,12 @@ keeper_service_run(Keeper *keeper, pid_t *start_pid)
 		 */
 		if (couldContactMonitor)
 		{
+			if (keeperState->assigned_role != keeperState->current_role)
+			{
+				log_info("Monitor assigned the new state \"%s\"",
+						 NodeStateToString(keeperState->assigned_role));
+			}
+
 			if (!keeper_ensure_current_state(keeper))
 			{
 				log_warn("pg_autoctl failed to ensure current state \"%s\": "

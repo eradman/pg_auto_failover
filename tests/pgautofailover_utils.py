@@ -177,8 +177,9 @@ class PGNode:
         if self.pg_autoctl_run_proc and self.pg_autoctl_run_proc.pid:
             print("kill -QUIT %d" % self.pg_autoctl_run_proc.pid)
             try:
-                os.killpg(os.getpgid(self.pg_autoctl_run_proc.pid), signal.SIGQUIT)
-            except ProcessLookupError as e:
+                pgid = os.getpgid(self.pg_autoctl_run_proc.pid)
+                os.killpg(pgid, signal.SIGQUIT)
+            except ProcessLookupError:
                 print("no such process")
 
     def stop_postgres(self):
@@ -215,8 +216,12 @@ class PGNode:
             # happy with "ready".
             pidfile = os.path.join(self.datadir, 'postmaster.pid')
             with open(pidfile, "r") as p:
-                pg_status = p.readlines()[7]
-            return pg_status.startswith("ready")
+                lines = p.readlines()
+                if len(lines) > 7:
+                    pg_status = lines[7]
+                    return pg_status.startswith("ready")
+                else:
+                    return False
         elif status_proc.returncode > 0:
             # ignore `pg_ctl status` output, silently try again till timeout
             return False
@@ -355,8 +360,13 @@ class DataNode(PGNode):
             time.sleep(1)
             current_state = self.get_state()
 
+            if current_state == target_state:
+                print("state of %s is now '%s'" %
+                      (self.datadir, current_state))
+                return True
+
             # only log the state if it has changed
-            if prev_state and current_state != prev_state:
+            if current_state != prev_state or prev_state is None:
                 if i == 0:
                     print("state of %s is '%s', waiting for '%s'" %
                           (self.datadir, current_state, target_state))
@@ -365,10 +375,6 @@ class DataNode(PGNode):
                           "waiting for '%s'" %
                           (self.datadir, current_state, i, target_state))
 
-            if current_state == target_state:
-                print("state of %s is now '%s'" %
-                      (self.datadir, current_state))
-                return True
             prev_state = current_state
 
         else:
@@ -378,11 +384,14 @@ class DataNode(PGNode):
             # grab pg_autoctl logs
             self.stop_pg_autoctl()
             out, err = self.pg_autoctl_run_proc.communicate()
+
             raise Exception("%s didn't reach %s after %d attempts; "
                             "current state is '%s',\n"
-                            "pg_autoctl out: %s\n err: %s" \
+                            "pg_autoctl out: %s\n err: %s\n"
+                            "monitor events:\n%s" \
                             % (self.datadir, target_state, timeout,
-                               current_state, out, err))
+                               current_state, out, err,
+                               self.get_events_str()))
 
     def get_state(self):
         """
@@ -401,6 +410,25 @@ SELECT reportedstate
         else:
             return results[0][0]
         return results
+
+    def get_events(self):
+        """
+        Returns the current list of events from the monitor.
+        """
+        last_events_query = "select nodeid, nodename, " \
+            "reportedstate, goalstate, " \
+            "reportedrepstate, reportedlsn, description " \
+            "from pgautofailover.last_events('default', count => 20)"
+        return self.monitor.run_sql_query(last_events_query)
+
+    def get_events_str(self):
+        return "\n".join(
+            ["%s:%-14s %17s/%-17s %7s %10s %s" % ("id", "nodename",
+                                                  "state", "goal state",
+                                                  "repl state", "lsn", "event")]
+            +
+            ["%2d:%-14s %17s/%-17s %7s %10s %s" % (id, n, rs, gs, reps, lsn, desc)
+             for id, n, rs, gs, reps, lsn, desc in self.get_events()])
 
     def enable_maintenance(self):
         """

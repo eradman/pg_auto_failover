@@ -1112,9 +1112,9 @@ printLastEvents(void *ctx, PGresult *result)
 
 	log_trace("printLastEvents: %d tuples", nTuples);
 
-	if (PQnfields(result) != 12)
+	if (PQnfields(result) != 14)
 	{
-		log_error("Query returned %d columns, expected 12", PQnfields(result));
+		log_error("Query returned %d columns, expected 14", PQnfields(result));
 		context->parsedOK = false;
 		return;
 	}
@@ -1130,11 +1130,11 @@ printLastEvents(void *ctx, PGresult *result)
 	{
 		char *eventTime = PQgetvalue(result, currentTupleIndex, 1);
 		char *formation = PQgetvalue(result, currentTupleIndex, 2);
-		char *groupId = PQgetvalue(result, currentTupleIndex, 4);
 		char *nodeId = PQgetvalue(result, currentTupleIndex, 3);
+		char *groupId = PQgetvalue(result, currentTupleIndex, 4);
 		char *currentState = PQgetvalue(result, currentTupleIndex, 7);
 		char *goalState = PQgetvalue(result, currentTupleIndex, 8);
-		char *description = PQgetvalue(result, currentTupleIndex, 11);
+		char *description = PQgetvalue(result, currentTupleIndex, 13);
 		char node[BUFSIZE];
 
 		/* for our grid alignment output it's best to have a single col here */

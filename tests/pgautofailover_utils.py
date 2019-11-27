@@ -125,6 +125,11 @@ class PGNode:
         time.sleep(1)
         if self.pg_autoctl_run_proc.returncode is not None:
             if self.pg_autoctl_run_proc.returncode > 0:
+                for entry in os.listdir(os.path.join(self.datadir, "log")):
+                    if not os.path.isfile(entry):
+                        continue
+                    print("Postgres log file %s:" % entry)
+                    print("%s\n" % open(entry).read())
                 raise Exception("%s failed, out: %s\n, err: %s" \
                                 % (run_command,
                                    self.pg_autoctl_run_proc.stdout,

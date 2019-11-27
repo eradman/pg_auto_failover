@@ -1075,7 +1075,7 @@ prepare_primary_conninfo(char *primaryConnInfo, int primaryConnInfoSize,
 	}
 
 	appendPQExpBuffer(buffer, "host=%s", escaped);
-	appendPQExpBuffer(buffer, " port=%d ", primaryPort);
+	appendPQExpBuffer(buffer, " port=%d", primaryPort);
 
 	if (!escape_recovery_conf_string(escaped, BUFSIZE, replicationUsername))
 	{

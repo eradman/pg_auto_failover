@@ -1348,11 +1348,18 @@ pgsql_get_sync_state_and_current_lsn(PGSQL *pgsql, const char *slotName,
 {
 	PgsrSyncAndWALContext context = { 0 };
 	char *sql =
-		"select sync_state, "
-		"pg_current_wal_lsn() "
-		"from pg_replication_slots slot join pg_stat_replication rep "
-		"on rep.pid = slot.active_pid "
-		"where slot_name = $1";
+		/*
+		 * Make it so that we still have the current WAL LSN even in the case
+		 * where there's no replication slot in use by any standby.
+		 */
+		"select coalesce(rep.sync_state, '') as sync_state,"
+		" pg_current_wal_lsn() "
+		"from (values(1)) as dummy "
+		"full outer join "
+		"( select sync_state from pg_replication_slots slot "
+		" join pg_stat_replication rep on rep.pid = slot.active_pid "
+		" where slot_name = $1 "
+		") as rep on true";
 
 	const Oid paramTypes[1] = { TEXTOID };
 	const char *paramValues[1] = { slotName };

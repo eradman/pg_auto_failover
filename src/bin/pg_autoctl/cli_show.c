@@ -808,14 +808,26 @@ cli_show_file(int argc, char **argv)
 	{
 		case SHOW_FILE_ALL:
 		{
-			fprintf(stdout, "config: \"%s\"\n", config.pathnames.config);
+			char *serialized_string = NULL;
+			JSON_Value *js = json_value_init_object();
+			JSON_Object *root = json_value_get_object(js);
+
+			json_object_set_string(root, "config", config.pathnames.config);
 
 			if (role == PG_AUTOCTL_ROLE_KEEPER)
 			{
-				fprintf(stdout, " state: \"%s\"\n", config.pathnames.state);
-				fprintf(stdout, "  init: \"%s\"\n", config.pathnames.init);
-				fprintf(stdout, "   pid: \"%s\"\n", config.pathnames.pid);
+				json_object_set_string(root, "state", config.pathnames.state);
+				json_object_set_string(root, "init", config.pathnames.init);
+				json_object_set_string(root, "pid", config.pathnames.pid);
 			}
+
+			serialized_string = json_serialize_to_string_pretty(js);
+
+			fprintf(stdout, "%s\n", serialized_string);
+
+			json_free_serialized_string(serialized_string);
+			json_value_free(js);
+
 			break;
 		}
 
@@ -831,7 +843,7 @@ cli_show_file(int argc, char **argv)
 			}
 			else
 			{
-				fprintf(stdout, "\"%s\"\n", config.pathnames.config);
+				fprintf(stdout, "%s\n", config.pathnames.config);
 			}
 			break;
 		}
@@ -860,7 +872,7 @@ cli_show_file(int argc, char **argv)
 			}
 			else
 			{
-				fprintf(stdout, "\"%s\"\n", config.pathnames.state);
+				fprintf(stdout, "%s\n", config.pathnames.state);
 			}
 
 			break;
@@ -893,7 +905,7 @@ cli_show_file(int argc, char **argv)
 			}
 			else
 			{
-				fprintf(stdout, "\"%s\"\n", config.pathnames.init);
+				fprintf(stdout, "%s\n", config.pathnames.init);
 			}
 
 			break;
@@ -917,7 +929,7 @@ cli_show_file(int argc, char **argv)
 			}
 			else
 			{
-				fprintf(stdout, "\"%s\"\n", config.pathnames.pid);
+				fprintf(stdout, "%s\n", config.pathnames.pid);
 			}
 
 			break;

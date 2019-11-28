@@ -740,8 +740,6 @@ pg_setup_is_running(PostgresSetup *pgSetup)
 bool
 pg_setup_is_ready(PostgresSetup *pgSetup, bool pg_is_not_running_is_ok)
 {
-	log_trace("pg_setup_is_ready");
-
 	if (pgSetup->control.pg_control_version > 0)
 	{
 		bool firstTime = true;
@@ -771,8 +769,11 @@ pg_setup_is_ready(PostgresSetup *pgSetup, bool pg_is_not_running_is_ok)
 		 */
 		while (pgSetup->pm_status != POSTMASTER_STATUS_READY)
 		{
-			log_trace("pg_setup_is_ready: %s",
-					  pmStatusToString(pgSetup->pm_status));
+			if (!firstTime)
+			{
+				log_trace("pg_setup_is_ready: %s",
+						  pmStatusToString(pgSetup->pm_status));
+			}
 
  			if (!get_pgpid(pgSetup, pg_is_not_running_is_ok))
 			{
@@ -1037,9 +1038,6 @@ nodeKindToString(PgInstanceKind kind)
 static PostmasterStatus
 pmStatusFromString(const char *postmasterStatus)
 {
-	log_trace("pmStatusFromString: postmaster status is \"%s\"",
-			  postmasterStatus);
-
 	if (strcmp(postmasterStatus, PM_STATUS_STARTING) == 0)
 	{
 		return POSTMASTER_STATUS_STARTING;

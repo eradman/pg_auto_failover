@@ -9,7 +9,7 @@ import subprocess
 from enum import Enum
 
 COMMAND_TIMEOUT = 60
-STATE_CHANGE_TIMEOUT = 120
+STATE_CHANGE_TIMEOUT = 90
 
 class Role(Enum):
     Monitor = 1
@@ -175,10 +175,20 @@ class PGNode:
         Kills the keeper by sending a SIGTERM to keeper's process group.
         """
         if self.pg_autoctl_run_proc and self.pg_autoctl_run_proc.pid:
-            print("kill -TERM %d" % self.pg_autoctl_run_proc.pid)
+            print("Terminating pg_autoctl process for %s [%d]" %
+                  (self.datadir, self.pg_autoctl_run_proc.pid))
             try:
                 pgid = os.getpgid(self.pg_autoctl_run_proc.pid)
                 os.killpg(pgid, signal.SIGTERM)
+
+                out, err = self.pg_autoctl_run_proc.communicate()
+                self.pg_autoctl_run_proc.wait()
+                self.pg_autoctl_run_proc.release()
+
+                self.pg_autoctl_run_proc = None
+
+                return out, err
+
             except ProcessLookupError:
                 print("no such process")
 
@@ -381,8 +391,7 @@ class DataNode(PGNode):
                   (self.datadir, target_state, timeout, current_state))
 
             # grab pg_autoctl logs
-            self.stop_pg_autoctl()
-            out, err = self.pg_autoctl_run_proc.communicate()
+            out, err = self.stop_pg_autoctl()
 
             raise Exception("%s didn't reach %s after %d attempts; "
                             "current state is '%s',\n"

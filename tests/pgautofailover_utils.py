@@ -9,7 +9,7 @@ import subprocess
 from enum import Enum
 
 COMMAND_TIMEOUT = 60
-STATE_CHANGE_TIMEOUT = 45
+STATE_CHANGE_TIMEOUT = 120
 
 class Role(Enum):
     Monitor = 1
@@ -175,7 +175,7 @@ class PGNode:
         Kills the keeper by sending a SIGTERM to keeper's process group.
         """
         if self.pg_autoctl_run_proc and self.pg_autoctl_run_proc.pid:
-            print("kill -QUIT %d" % self.pg_autoctl_run_proc.pid)
+            print("kill -TERM %d" % self.pg_autoctl_run_proc.pid)
             try:
                 pgid = os.getpgid(self.pg_autoctl_run_proc.pid)
                 os.killpg(pgid, signal.SIGTERM)
@@ -361,12 +361,11 @@ class DataNode(PGNode):
             current_state = self.get_state()
 
             if current_state == target_state:
-                print("state of %s is now '%s'" %
-                      (self.datadir, current_state))
+                print("state of %s is now '%s'" % (self.datadir, current_state))
                 return True
 
             # only log the state if it has changed
-            if current_state != prev_state or prev_state is None:
+            if current_state != prev_state:
                 if i == 0:
                     print("state of %s is '%s', waiting for '%s'" %
                           (self.datadir, current_state, target_state))

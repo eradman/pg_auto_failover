@@ -21,9 +21,6 @@
 #include "state.h"
 
 
-static bool keeper_get_replication_state(Keeper *keeper);
-
-
 /*
  * keeper_init initialises the keeper logic according to the given keeper
  * configuration. It also reads the state file from disk. The state file
@@ -471,20 +468,32 @@ keeper_update_pg_state(Keeper *keeper)
 		pgsql_init(pgsql, connInfo, PGSQL_CONN_LOCAL);
 
 		/*
-		 * Update our cache of file path locations for Postgres configuration
-		 * files (including HBA), in case it's been moved to somewhere else.
-		 * This could happen when using the debian/ubuntu pg_createcluster
-		 * command on an already existing cluster, for instance.
+		 * Update our Postgres metadata now.
+		 *
+		 * First, update our cache of file path locations for Postgres
+		 * configuration files (including HBA), in case it's been moved to
+		 * somewhere else. This could happen when using the debian/ubuntu
+		 * pg_createcluster command on an already existing cluster, for
+		 * instance.
+		 *
+		 * Also update our view of pg_is_in_recovery, the replication sync
+		 * state when we are a primary with a standby currently using our
+		 * replication slot, and our current LSN position.
 		 *
 		 */
-		if (!pgsql_get_config_file_path(pgsql,
-										pgSetup->pgConfigPath.conf, MAXPGPATH))
+		if (!pgsql_get_postgres_metadata(pgsql,
+										 config->replication_slot_name,
+										 pgSetup->pgConfigPath.conf,
+										 pgSetup->pgConfigPath.hba,
+										 &pgSetup->is_in_recovery,
+										 postgres->pgsrSyncState,
+										 postgres->currentLSN))
 		{
-			log_error("Failed to get the postgresql.conf path from the "
-					  "local Postgres server, see above for details");
+			log_error("Failed to update the local Postgres metadata");
 			return false;
 		}
 
+		/* cache invalidation for config_file and hba_file */
 		if (strcmp(pgSetup->pgConfigPath.conf,
 				   config->pgSetup.pgConfigPath.conf) != 0)
 		{
@@ -495,14 +504,6 @@ keeper_update_pg_state(Keeper *keeper)
 
 			strlcpy(config->pgSetup.pgConfigPath.conf,
 					pgSetup->pgConfigPath.conf, MAXPGPATH);
-		}
-
-		if (!pgsql_get_hba_file_path(pgsql,
-									 pgSetup->pgConfigPath.hba, MAXPGPATH))
-		{
-			log_error("Failed to obtain the HBA file path from the local "
-					  "PostgreSQL server.");
-			return false;
 		}
 
 		if (strcmp(pgSetup->pgConfigPath.hba,
@@ -543,8 +544,7 @@ keeper_update_pg_state(Keeper *keeper)
 		case SECONDARY_STATE:
 		case CATCHINGUP_STATE:
 		{
-			return postgres->pgIsRunning
-				&& keeper_get_replication_state(keeper);
+			return postgres->pgIsRunning;
 		}
 
 		default:
@@ -609,56 +609,6 @@ keeper_restart_postgres(Keeper *keeper)
 		return false;
 	}
 	return true;
-}
-
-
-/*
- * keeper_get_replication_state connects to the local PostgreSQL instance and
- * fetches replication related information: pg_stat_replication.sync_state and
- * WAL lag.
- */
-static bool
-keeper_get_replication_state(Keeper *keeper)
-{
-	KeeperStateData *keeperState = &(keeper->state);
-	KeeperConfig *config = &(keeper->config);
-	PostgresSetup *pgSetup = &(keeper->postgres.postgresSetup);
-	LocalPostgresServer *postgres = &(keeper->postgres);
-
-	PGSQL *pgsql = &(postgres->sqlClient);
-	bool missingStateOk = keeperState->current_role == WAIT_PRIMARY_STATE;
-
-	bool success = false;
-
-	/* figure out if we are in recovery or not */
-	if (!pgsql_is_in_recovery(pgsql, &pgSetup->is_in_recovery))
-	{
-		/*
-		 * errors have been logged already, probably failed to connect.
-		 */
-		pgsql_finish(pgsql);
-		return false;
-	}
-
-	if (pg_setup_is_primary(pgSetup))
-	{
-		success =
-			pgsql_get_sync_state_and_current_lsn(
-				pgsql,
-				config->replication_slot_name,
-				postgres->pgsrSyncState,
-				postgres->currentLSN,
-				PG_LSN_MAXLENGTH,
-				missingStateOk);
-	}
-	else
-	{
-		success = pgsql_get_received_lsn_from_standby(pgsql, postgres->currentLSN,
-													  PG_LSN_MAXLENGTH);
-	}
-	pgsql_finish(pgsql);
-
-	return success;
 }
 
 

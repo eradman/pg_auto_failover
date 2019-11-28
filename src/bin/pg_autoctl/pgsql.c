@@ -34,6 +34,7 @@ static bool pgsql_get_current_setting(PGSQL *pgsql, char *settingName,
 									  char **currentValue);
 static int escape_conninfo_value(char *destination, const char *string);
 static void parsePgsrSyncStateAndWAL(void *ctx, PGresult *result);
+static void parsePgMetadata(void *ctx, PGresult *result);
 
 
 /*
@@ -743,62 +744,6 @@ pgsql_reload_conf(PGSQL *pgsql)
 
 
 /*
- * pgsql_get_config_file_path gets the value of the config_file setting in
- * Postgres or returns false if a failure occurred. The value is copied to
- * the configFilePath pointer.
- */
-bool
-pgsql_get_config_file_path(PGSQL *pgsql, char *configFilePath, int maxPathLength)
-{
-	char *configValue = NULL;
-
-	if (!pgsql_get_current_setting(pgsql, "config_file", &configValue))
-	{
-		return false;
-	}
-
-	strlcpy(configFilePath, configValue, maxPathLength);
-	free(configValue);
-
-	return true;
-}
-
-
-/*
- * pgsql_get_hba_file_path gets the value of the hba_file setting in
- * Postgres or returns false if a failure occurred. The value is copied to
- * the hbaFilePath pointer.
- */
-bool
-pgsql_get_hba_file_path(PGSQL *pgsql, char *hbaFilePath, int maxPathLength)
-{
-	char *configValue = NULL;
-	int hbaFilePathLength = 0;
-
-	if (!pgsql_get_current_setting(pgsql, "hba_file", &configValue))
-	{
-		/* pgsql_get_current_setting logs a relevant error */
-		return false;
-	}
-
-	hbaFilePathLength = strlcpy(hbaFilePath, configValue, maxPathLength);
-
-	if (hbaFilePathLength >= maxPathLength)
-	{
-		log_error("The hba_file \"%s\" returned by postgres is %d characters, "
-				  "the maximum supported by pg_autoctl is %d characters",
-				  configValue, hbaFilePathLength, maxPathLength);
-		free(configValue);
-		return false;
-	}
-
-	free(configValue);
-
-	return true;
-}
-
-
-/*
  * pgsql_get_current_setting gets the value of a GUC in Postgres by running
  * SELECT current_setting($settingName), or returns false if a failure occurred.
  *
@@ -1329,59 +1274,87 @@ validate_connection_string(const char *connectionString)
 
 
 /*
- * pgsql_get_sync_state_and_wal_lag queries a primary PostgreSQL server to get
- * both the current pg_stat_replication.sync_state value and replication lag.
+ * pgsql_get_postgres_metadata returns several bits of information that we need
+ * to take decisions in the rest of the code:
  *
- * currentLSN is text representation of a 64 bit LSN value.
+ *  - config_file path (cache invalidation in case it changed)
+ *  - hba_file path (cache invalidation in case it changed)
+ *  - pg_is_in_recovery (primary or standby, as expected?)
+ *  - sync_state from pg_stat_replication when a primary
+ *  - current_lsn from the server
+ *
+ * With those metadata we can then check our expectations and take decisions in
+ * some cases. We can obtain all the metadata that we need easily enough in a
+ * single SQL query, so that's what we do.
  */
-typedef struct PgsrSyncAndWALContext
+typedef struct PgMetadata
 {
-	bool		parsedOk;
-	char		syncState[PGSR_SYNC_STATE_MAXLENGTH];
-	char        currentLSN[PG_LSN_MAXLENGTH];
-} PgsrSyncAndWALContext;
+	bool	parsedOk;
+	char	config_file[MAXPGPATH];
+	char	hba_file[MAXPGPATH];
+	bool	pg_is_in_recovery;
+	char	syncState[PGSR_SYNC_STATE_MAXLENGTH];
+	char	currentLSN[PG_LSN_MAXLENGTH];
+} PgMetadata;
 
 bool
-pgsql_get_sync_state_and_current_lsn(PGSQL *pgsql, const char *slotName,
-								 	 char *pgsrSyncState, char *currentLSN,
-									 int maxLSNSize, bool missing_ok)
+pgsql_get_postgres_metadata(PGSQL *pgsql, const char *slotName,
+							char *config_file, char *hba_file,
+							bool *pg_is_in_recovery,
+							char *pgsrSyncState, char *currentLSN)
 {
-	PgsrSyncAndWALContext context = { 0 };
+	PgMetadata context = { 0 };
 	char *sql =
 		/*
 		 * Make it so that we still have the current WAL LSN even in the case
 		 * where there's no replication slot in use by any standby.
 		 */
-		"select coalesce(rep.sync_state, '') as sync_state,"
-		" pg_current_wal_lsn() "
-		"from (values(1)) as dummy "
-		"full outer join "
-		"( select sync_state from pg_replication_slots slot "
-		" join pg_stat_replication rep on rep.pid = slot.active_pid "
-		" where slot_name = $1 "
-		") as rep on true";
+		"select current_setting('config_file') as conf,"
+		" current_setting('hba_file') as hba,"
+		" pg_is_in_recovery(),"
+		" coalesce(rep.sync_state, '') as sync_state,"
+		" case when pg_is_in_recovery()"
+		" then pg_last_wal_receive_lsn()"
+		" else pg_current_wal_lsn()"
+        " end as current_lsn"
+		" from (values(1)) as dummy"
+		" full outer join"
+		" ("
+		" select sync_state"
+		" from pg_replication_slots slot"
+		" join pg_stat_replication rep"
+		" on rep.pid = slot.active_pid"
+        " where slot_name = $1"
+		" ) as rep"
+		" on true";
 
 	const Oid paramTypes[1] = { TEXTOID };
 	const char *paramValues[1] = { slotName };
 	int paramCount = 1;
 
 	pgsql_execute_with_params(pgsql, sql, paramCount, paramTypes, paramValues,
-							  &context, &parsePgsrSyncStateAndWAL);
+							  &context, &parsePgMetadata);
 
 	if (!context.parsedOk)
 	{
-		if (!missing_ok)
-		{
-			log_error(
-				"PostgreSQL primary server has lost track of its standby: "
-				"pg_stat_replication reports no client using the slot \"%s\".",
-				slotName);
-		}
+		log_error("Failed to parse the Postgres metadata");
 		return false;
 	}
 
-	strlcpy(pgsrSyncState, context.syncState, PGSR_SYNC_STATE_MAXLENGTH);
-	strlcpy(currentLSN, context.currentLSN, maxLSNSize);
+	strlcpy(config_file, context.config_file, MAXPGPATH);
+	strlcpy(hba_file, context.hba_file, MAXPGPATH);
+	*pg_is_in_recovery = context.pg_is_in_recovery;
+
+	/* the last two metadata items are opt-in */
+	if (pgsrSyncState != NULL)
+	{
+		strlcpy(pgsrSyncState, context.syncState, PGSR_SYNC_STATE_MAXLENGTH);
+	}
+
+	if (currentLSN != NULL)
+	{
+		strlcpy(currentLSN, context.currentLSN, PG_LSN_MAXLENGTH);
+	}
 
 	return true;
 }
@@ -1392,95 +1365,37 @@ pgsql_get_sync_state_and_current_lsn(PGSQL *pgsql, const char *slotName,
  * two columns from pg_stat_replication: sync_state and currentLSN.
  */
 static void
-parsePgsrSyncStateAndWAL(void *ctx, PGresult *result)
+parsePgMetadata(void *ctx, PGresult *result)
 {
-	PgsrSyncAndWALContext *context = (PgsrSyncAndWALContext *) ctx;
+	PgMetadata *context = (PgMetadata *) ctx;
 
-	if (PQnfields(result) != 2)
+	if (PQnfields(result) != 5)
 	{
-		log_error("Query returned %d columns, expected 2", PQnfields(result));
+		log_error("Query returned %d columns, expected 5", PQnfields(result));
 		context->parsedOk = false;
 		return;
 	}
 
-	switch (PQntuples(result))
+	if (PQntuples(result) != 1)
 	{
-		case 0:
-			context->parsedOk = false;
-			return;
-
-		case 1:
-		{
-			/* we trust our length and PostgreSQL results */
-			strlcpy(context->syncState,
-					PQgetvalue(result, 0, 0),
-					PGSR_SYNC_STATE_MAXLENGTH);
-
-			strlcpy(context->currentLSN,
-					PQgetvalue(result, 0, 1),
-					PG_LSN_MAXLENGTH);
-
-			context->parsedOk = true;
-			return;
-		}
-
-		default:
-			context->parsedOk = false;
-			log_error("parsePgsrSyncStateAndWAL received more than 1 result");
-			return;
-	}
-}
-
-
-/*
- * pgsql_get_received_lsn_from_standby queries a standby PostgreSQL server to get the
- * received_lsn value from the pg_stat_wal_receiver system view.
- *
- * received_lsn is the latest lsn known to be received and flushed to the disk. It does
- * not specify if it is applied or not. Caller should have allocated necessary memory
- * for result value.
- *
- * We are collecting the latest WAL entry that is received successfully. It will be
- * eventually applied to the receiving database.  This information will later be
- * used by monitor to decide which secondary has the latest data.
- *
- * Once a WAL is received and stored, it would be replayed to ensure database state
- * is current just before the promotion time. Therefore when we look from monitor side
- * it is the same if the WAL is just received and stored, or already applied.
- *
- * Related PostgreSQL documentation at
- * https://www.postgresql.org/docs/current/warm-standby.html#STANDBY-SERVER-OPERATION
- * states that
- *   Standby mode is exited and the server switches to normal operation when
- *   pg_ctl promote is run or a trigger file is found (trigger_file). Before failover,
- *   any WAL immediately available in the archive or in pg_wal will be restored,
- *   but no attempt is made to connect to the master.
- */
-bool
-pgsql_get_received_lsn_from_standby(PGSQL *pgsql, char *receivedLSN, int maxLSNSize)
-{
-	SingleValueResultContext context;
-	char *sql = "SELECT pg_last_wal_receive_lsn()";
-
-	context.resultType = PGSQL_RESULT_STRING;
-	context.parsedOk = false;
-
-	log_trace("pgsql_get_received_lsn_from_standby : running %s", sql);
-
-	pgsql_execute_with_params(pgsql, sql, 0, NULL, NULL,
-							  &context, &parseSingleValueResult);
-
-	if (!context.parsedOk)
-	{
-		log_error("PostgreSQL cannot reach the primary server: "
-				  "the system view pg_stat_wal_receiver has no rows.");
-		return false;
+		log_error("Query returned %d rows, expected 1", PQntuples(result));
+		context->parsedOk = false;
+		return;
 	}
 
-	strlcpy(receivedLSN, context.strVal, maxLSNSize);
+	strlcpy(context->config_file, PQgetvalue(result, 0, 0), MAXPGPATH);
+	strlcpy(context->hba_file, PQgetvalue(result, 0, 1), MAXPGPATH);
 
-	return true;
+	context->pg_is_in_recovery = strcmp(PQgetvalue(result, 0, 2), "t") == 0;
+
+	strlcpy(context->syncState,
+			PQgetvalue(result, 0, 3), PGSR_SYNC_STATE_MAXLENGTH);
+
+	strlcpy(context->currentLSN, PQgetvalue(result, 0, 4), PG_LSN_MAXLENGTH);
+
+	context->parsedOk = true;
 }
+
 
 /*
  * LISTEN/NOTIFY support.

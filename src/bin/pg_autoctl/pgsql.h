@@ -171,6 +171,11 @@ int make_conninfo_field_str(char *destination, const char *key, const char *valu
 int make_conninfo_field_int(char *destination, const char *key, int value);
 bool validate_connection_string(const char *connectionString);
 
+bool pgsql_get_postgres_metadata(PGSQL *pgsql, const char *slotName,
+								 char *config_file, char *hba_file,
+								 bool *pg_is_in_recovery,
+								 char *pgsrSyncState, char *currentLSN);
+
 bool pgsql_get_sync_state_and_current_lsn(PGSQL *pgsql, const char *slotName,
 									  	  char *pgsrSyncState, char *currentLSN,
 										  int maxLSNSize, bool missing_ok);

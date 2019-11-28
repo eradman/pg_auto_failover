@@ -178,7 +178,7 @@ class PGNode:
             print("kill -QUIT %d" % self.pg_autoctl_run_proc.pid)
             try:
                 pgid = os.getpgid(self.pg_autoctl_run_proc.pid)
-                os.killpg(pgid, signal.SIGQUIT)
+                os.killpg(pgid, signal.SIGTERM)
             except ProcessLookupError:
                 print("no such process")
 
@@ -188,7 +188,7 @@ class PGNode:
           pg_ctl -D ${self.datadir} --wait --mode immediate stop
         """
         stop_command = [shutil.which('pg_ctl'), '-D', self.datadir,
-                        '--wait', '--mode', 'immediate', 'stop']
+                        '--wait', '--mode', 'fast', 'stop']
         stop_proc = self.vnode.run(stop_command)
         out, err = stop_proc.communicate(timeout=COMMAND_TIMEOUT)
         if stop_proc.returncode > 0:

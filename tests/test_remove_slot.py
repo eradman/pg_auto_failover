@@ -40,7 +40,7 @@ def test_004_read_from_secondary():
     results = node2.run_sql_query("SELECT * FROM t1")
     assert results == [(1,), (2,)]
 
-def test_005_multiple_manual_failover_verify_replication_slot_removed():
+def test_005_replication_slot_first_failover():
     count_slots_query = "select count(*) from pg_replication_slots"
 
     monitor.failover()
@@ -51,6 +51,9 @@ def test_005_multiple_manual_failover_verify_replication_slot_removed():
     node2_replication_slots = node2.run_sql_query(count_slots_query)
     assert node2_replication_slots == [(1,)]
 
+def test_006_replication_slot_second_failover():
+    count_slots_query = "select count(*) from pg_replication_slots"
+
     monitor.failover()
     assert node1.wait_until_state(target_state="primary")
     assert node2.wait_until_state(target_state="secondary")
@@ -59,7 +62,7 @@ def test_005_multiple_manual_failover_verify_replication_slot_removed():
     node2_replication_slots = node2.run_sql_query(count_slots_query);
     assert node2_replication_slots == [(0,)]
 
-def test_006_drop_primary():
+def test_007_drop_primary():
     node1.drop()
     assert not node1.pg_is_running()
     assert node2.wait_until_state(target_state="single")
